@@ -1,0 +1,9 @@
+# Matlab files
+*.asv
+
+
+# custom files
+/data/*
+!/data/LICENSE
+/results/*
+!/results/.gitkeep
