@@ -50,11 +50,12 @@ void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
     // Constraints:
     // 1. Dynamics: x_{k+1} = A x_k + B u_k + d (nx * Hp)
     // 2. Track bounds (SL): left/right limits (2 * Hp)
+    // 3. Input bounds: steer/accel (2 * Hp)
     int n_eq = nx * Hp;
-    int n_ineq = 2 * Hp; 
-    if (m_params.mode == TrackConstraintMode::SCR) {
+    int n_ineq = 4 * Hp; 
+    if (m_params.mode == TrackConstraintMode::SCR || m_params.mode == TrackConstraintMode::ENHANCED_SCR) {
         // Just placeholder for now, assume 4 sides per polygon
-        n_ineq = 4 * Hp; 
+        n_ineq = 6 * Hp; 
     }
     int n_cons = n_eq + n_ineq;
     
@@ -219,11 +220,9 @@ void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
         H_triplets.push_back(Eigen::Triplet<double>(uk + 0, uk + 0, 2 * m_params.R(0,0)));
         H_triplets.push_back(Eigen::Triplet<double>(uk + 1, uk + 1, 2 * m_params.R(1,1)));
         
+        // Upper triangular only! uk < uk_next
         H_triplets.push_back(Eigen::Triplet<double>(uk + 0, uk_next + 0, -m_params.R(0,0)));
-        H_triplets.push_back(Eigen::Triplet<double>(uk_next + 0, uk + 0, -m_params.R(0,0)));
-        
         H_triplets.push_back(Eigen::Triplet<double>(uk + 1, uk_next + 1, -m_params.R(1,1)));
-        H_triplets.push_back(Eigen::Triplet<double>(uk_next + 1, uk + 1, -m_params.R(1,1)));
     }
     
     // First and last input delta cost fixes
