@@ -156,13 +156,22 @@ int main() {
         while (yaw_error > PI) yaw_error -= 2 * PI;
         while (yaw_error < -PI) yaw_error += 2 * PI;
         
+        // Target speed based on corner tightness
+        double target_speed = 25.0; // Max speed on straights
+        if (std::abs(yaw_error) > 0.05) target_speed = 15.0;
+        if (std::abs(yaw_error) > 0.15) target_speed = 8.0;
+        if (std::abs(yaw_error) > 0.3) target_speed = 5.0;
+        
+        // Speed control
+        if (state(2) < target_speed) {
+            target_accel = 3.0; // Accelerate
+        } else {
+            target_accel = -5.0; // Brake
+        }
+        
         target_steer = yaw_error * 0.8; // P controller for steering
         if (target_steer > 0.2) target_steer = 0.2;
         if (target_steer < -0.2) target_steer = -0.2;
-        
-        // Speed control
-        if (state(2) < 20.0) target_accel = 4.0; // target 20 m/s (~72 km/h)
-        else target_accel = -2.0;
         
         // --- 2. Physics Simulation ---
         Eigen::Vector2d u(target_steer, target_accel); // [delta, torque/accel]
@@ -203,6 +212,15 @@ int main() {
         DrawText(TextFormat("Last Lap: %.2f s", last_lap_time), 10, 80, 20, GRAY);
         DrawText(TextFormat("Best Lap: %.2f s", best_lap_time), 10, 100, 20, GOLD);
         DrawText(TextFormat("Delta: %+.2f s", delta), 10, 120, 20, delta > 0 ? RED : GREEN);
+        
+        // Pedals HUD
+        DrawText("Throttle", 10, 160, 20, DARKGRAY);
+        DrawRectangle(100, 160, (target_accel > 0 ? (target_accel / 4.0) * 100.0 : 0), 20, GREEN);
+        DrawRectangleLines(100, 160, 100, 20, BLACK);
+        
+        DrawText("Brake", 10, 190, 20, DARKGRAY);
+        DrawRectangle(100, 190, (target_accel < 0 ? (-target_accel / 5.0) * 100.0 : 0), 20, RED);
+        DrawRectangleLines(100, 190, 100, 20, BLACK);
         
         EndDrawing();
     }
