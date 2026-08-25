@@ -51,11 +51,12 @@ void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
     // 1. Dynamics: x_{k+1} = A x_k + B u_k + d (nx * Hp)
     // 2. Track bounds (SL): left/right limits (2 * Hp)
     // 3. Input bounds: steer/accel (2 * Hp)
+    // 4. Slack bound: slack >= 0 (1)
     int n_eq = nx * Hp;
-    int n_ineq = 4 * Hp; 
+    int n_ineq = 4 * Hp + 1; 
     if (m_params.mode == TrackConstraintMode::SCR || m_params.mode == TrackConstraintMode::ENHANCED_SCR) {
         // Just placeholder for now, assume 4 sides per polygon
-        n_ineq = 6 * Hp; 
+        n_ineq = 6 * Hp + 1; 
     }
     int n_cons = n_eq + n_ineq;
     
@@ -209,6 +210,12 @@ void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
         eq_row += nx;
     }
     
+    // Slack >= 0
+    A_triplets.push_back(Eigen::Triplet<double>(ineq_row, slack_idx, 1.0));
+    l(ineq_row) = 0.0;
+    u(ineq_row) = OsqpEigen::INFTY;
+    ineq_row++;
+    
     // Add Slack variable cost
     f(slack_idx) = m_params.S_slack;
     
@@ -232,6 +239,11 @@ void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
     int last_u = (Hp - 1) * ns + nx;
     H_triplets.push_back(Eigen::Triplet<double>(last_u, last_u, m_params.R(0,0)));
     H_triplets.push_back(Eigen::Triplet<double>(last_u+1, last_u+1, m_params.R(1,1)));
+    
+    // Regularization to ensure H is strictly positive definite
+    for (int i = 0; i < n_vars; ++i) {
+        H_triplets.push_back(Eigen::Triplet<double>(i, i, 1e-4));
+    }
     
     Eigen::SparseMatrix<double> H(n_vars, n_vars);
     H.setFromTriplets(H_triplets.begin(), H_triplets.end());
@@ -263,34 +275,58 @@ void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
 void SCRController::computeOptimalControl(const Eigen::VectorXd& current_state, float& out_accel, float& out_steer) {
     if (m_track.empty()) return;
     
-    if (!m_initialized) {
-        warmStart(current_state);
+    if (!m_initialized || current_state.hasNaN()) {
+        warmStart(current_state.hasNaN() ? Eigen::VectorXd::Zero(6) : current_state);
         m_params.R << 10.0, 0, 0, 1.0; // Weights for [steer, accel]
         m_initialized = true;
+    } else {
+        // Shift trajectory by 1 step for better linearization
+        for (int k = 0; k < m_params.Hp - 1; ++k) {
+            X_opt_prev.col(k) = X_opt_prev.col(k + 1);
+            U_opt_prev.col(k) = U_opt_prev.col(k + 1);
+        }
+        // Predict the final step
+        SingleTrack model;
+        X_opt_prev.col(m_params.Hp - 1) = model.rk4(X_opt_prev.col(m_params.Hp - 1), U_opt_prev.col(m_params.Hp - 1), m_params.dt);
     }
+    
+    // Fix initial state mismatch
+    X_opt_prev.col(0) = current_state;
     
     formulateQP(current_state);
     
     if (m_solver->solveProblem() == OsqpEigen::ErrorExitFlag::NoError) {
-        Eigen::VectorXd QPSolution = m_solver->getSolution();
-        
-        int nx = 6;
-        int nu = 2;
-        int ns = nx + nu;
-        
-        for (int k = 0; k < m_params.Hp; ++k) {
-            int idx_xk = k * ns;
-            int idx_uk = k * ns + nx;
+        if (m_solver->workspace()->info->status_val == OSQP_SOLVED) {
+            Eigen::VectorXd QPSolution = m_solver->getSolution();
             
-            X_opt_prev.col(k) = QPSolution.segment(idx_xk, nx);
-            U_opt_prev.col(k) = QPSolution.segment(idx_uk, nu);
+            if (!QPSolution.hasNaN()) {
+                int nx = 6;
+                int nu = 2;
+                int ns = nx + nu;
+                
+                for (int k = 0; k < m_params.Hp; ++k) {
+                    int idx_xk = k * ns;
+                    int idx_uk = k * ns + nx;
+                    
+                    X_opt_prev.col(k) = QPSolution.segment(idx_xk, nx);
+                    U_opt_prev.col(k) = QPSolution.segment(idx_uk, nu);
+                }
+            } else {
+                std::cout << "[SCRController] QP Solution contained NaN! Fallback.\n";
+            }
+        } else {
+            std::cout << "[SCRController] QP Not Solved! Status: " << m_solver->workspace()->info->status_val << "\n";
         }
-        
-        out_steer = U_opt_prev(0, 0);
-        out_accel = U_opt_prev(1, 0);
     } else {
         std::cout << "[SCRController] QP Failed! Using warm start fallback.\n";
-        out_steer = U_opt_prev(0, 0);
-        out_accel = U_opt_prev(1, 0);
     }
+    
+    out_steer = std::isnan(U_opt_prev(0, 0)) ? 0.0f : U_opt_prev(0, 0);
+    out_accel = std::isnan(U_opt_prev(1, 0)) ? 0.0f : U_opt_prev(1, 0);
+    
+    // Hard clamp to prevent physics explosion
+    if (out_steer > 0.5f) out_steer = 0.5f;
+    if (out_steer < -0.5f) out_steer = -0.5f;
+    if (out_accel > 5.0f) out_accel = 5.0f;
+    if (out_accel < -10.0f) out_accel = -10.0f;
 }
