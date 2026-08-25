@@ -1,8 +1,11 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.24)
 project(AssettoCorsa_Enhanced_SCR)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# This prevents OSQP's older CMakeLists from throwing policy errors in CMake 4.x
+set(CMAKE_POLICY_VERSION_MINIMUM 3.24)
 
 include(FetchContent)
 
@@ -19,6 +22,7 @@ set(OSQP_BUILD_TESTING OFF CACHE BOOL "Disable OSQP tests" FORCE)
 FetchContent_Declare(osqp
   GIT_REPOSITORY https://github.com/osqp/osqp.git
   GIT_TAG        v0.6.3
+  OVERRIDE_FIND_PACKAGE
 )
 FetchContent_MakeAvailable(osqp)
 
@@ -28,6 +32,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Disable shared libs" FORCE)
 FetchContent_Declare(OsqpEigen
   GIT_REPOSITORY https://github.com/robotology/osqp-eigen.git
   GIT_TAG        v0.8.1
+  OVERRIDE_FIND_PACKAGE
 )
 FetchContent_MakeAvailable(OsqpEigen)
 
