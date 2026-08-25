@@ -1,11 +1,16 @@
 #pragma once
 #include <Eigen/Dense>
-#include <OsqpEigen/OsqpEigen.h>
+#include <memory>
 #include "../ac_structs.h"
+
+namespace OsqpEigen {
+    class Solver;
+}
 
 class SCRController {
 public:
     SCRController();
+    ~SCRController();
     void init();
     
     // Runs the Sequential Convex Programming loop (Double-Resolution)
@@ -15,5 +20,5 @@ private:
     void formulateQP(const Eigen::VectorXd& current_state);
     void calculateDynamicTerminalConstraint();
 
-    OsqpEigen::Solver m_solver;
+    std::unique_ptr<OsqpEigen::Solver> m_solver;
 };

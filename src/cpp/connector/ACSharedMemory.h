@@ -1,6 +1,6 @@
 #pragma once
 #include <windows.h>
-#include "ac_structs.h"
+#include "../ac_structs.h"
 
 class ACSharedMemory {
 public:

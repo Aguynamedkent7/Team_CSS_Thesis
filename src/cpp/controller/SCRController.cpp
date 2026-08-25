@@ -1,14 +1,20 @@
 #include "SCRController.h"
 #include "../model/SingleTrack.h"
+#include <OsqpEigen/OsqpEigen.h>
 #include <iostream>
 #include <cmath>
 
-SCRController::SCRController() {}
+SCRController::SCRController() {
+    m_solver = std::make_unique<OsqpEigen::Solver>();
+    std::cout << "[SCRController] Constructed\n";
+}
+
+SCRController::~SCRController() = default;
 
 void SCRController::init() {
-    std::cout << "Initializing SCR Controller (OSQP/Eigen)...\n";
-    m_solver.settings()->setVerbosity(false);
-    m_solver.settings()->setWarmStart(true);
+    // Basic setup
+    m_solver->settings()->setVerbosity(false);
+    m_solver->settings()->setWarmStart(true);
 }
 
 void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
