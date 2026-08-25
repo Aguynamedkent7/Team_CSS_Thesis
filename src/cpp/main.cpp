@@ -12,7 +12,6 @@ int main() {
     ACSharedMemory ac;
     if (!ac.init()) {
         std::cerr << "Failed to initialize AC Shared Memory.\n";
-        // Continue anyway for testing if AC isn't running
     } else {
         std::cout << "Successfully connected to Assetto Corsa Shared Memory.\n";
     }
@@ -29,10 +28,13 @@ int main() {
     
     std::cout << "Entering main control loop (100Hz)...\n";
     
-    // Main Control Loop
-    // AC Physics runs at 333Hz (approx 3ms)
-    // We run our loop at 100Hz (10ms)
+    using namespace std::chrono;
+    const int TARGET_HZ = 100;
+    const nanoseconds target_duration(1000000000 / TARGET_HZ); // 10ms
+    
     while (true) {
+        auto loop_start = high_resolution_clock::now();
+        
         auto* physics = ac.getPhysics();
         if (physics) {
             float target_accel = 0.0f;
@@ -49,7 +51,15 @@ int main() {
             vjoy.sendInputs(inputs.steering_axis, inputs.gas_pedal, inputs.brake_pedal);
         }
         
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        auto loop_end = high_resolution_clock::now();
+        auto elapsed = loop_end - loop_start;
+        
+        if (elapsed < target_duration) {
+            std::this_thread::sleep_for(target_duration - elapsed);
+        } else {
+            std::cerr << "WARNING: Solver missed 100Hz deadline! Took " 
+                      << duration_cast<milliseconds>(elapsed).count() << "ms\n";
+        }
     }
     
     return 0;
