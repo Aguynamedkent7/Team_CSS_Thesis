@@ -10,11 +10,11 @@ public:
         double l_r = 1.4;     // Dist to rear axle
         
         // Pacejka
-        double Bf = 10.0, Cf = 1.9, Df = 1.0; 
-        double Br = 10.0, Cr = 1.9, Dr = 1.0;
+        double Bf = 10.0, Cf = 1.9, Df = 7350.0; 
+        double Br = 10.0, Cr = 1.9, Dr = 7350.0;
         
         // Drivetrain
-        double Cm1 = 1.0, Cm2 = 0.0, Cr0 = 0.0, Cr2 = 0.0;
+        double Cm1 = 1500.0, Cm2 = 0.0, Cr0 = 0.0, Cr2 = 0.0;
     };
 
     SingleTrack(Parameters p = Parameters());

@@ -17,31 +17,62 @@ struct Waypoint {
     double inner_bound, outer_bound; 
 };
 
-std::vector<Waypoint> generateOvalTrack(double radius, double straight_len, double width, int points) {
+std::vector<Waypoint> generateHockenheim(double scale) {
     std::vector<Waypoint> track;
-    int half_points = points / 2;
+    double track_width = 0.25 * scale;
     
-    // Bottom straight (right to left)
-    for (int i = 0; i < straight_len; i += 2) {
-        track.push_back({ (double)(straight_len/2 - i), radius, width/2, width/2 });
-    }
+    double x = 0.0, y = 0.0, yaw = 0.0;
     
-    // Left curve
-    for (int i = 0; i <= 180; i += 5) {
-        double angle = i * PI / 180.0;
-        track.push_back({ -straight_len/2 - radius * std::sin(angle), radius * std::cos(angle), width/2, width/2 });
-    }
+    auto add_turn = [&](double angle_deg, double length_m, int segments) {
+        double d_theta = (angle_deg * PI / 180.0) / segments;
+        double ds = (length_m * scale) / segments;
+        
+        for (int i = 0; i < segments; i++) {
+            if (std::abs(d_theta) < 1e-6) {
+                x += ds * std::cos(yaw);
+                y += ds * std::sin(yaw);
+            } else {
+                double R = (length_m * scale) / (angle_deg * PI / 180.0);
+                x += R * (std::sin(yaw + d_theta) - std::sin(yaw));
+                y -= R * (std::cos(yaw + d_theta) - std::cos(yaw));
+                yaw += d_theta;
+            }
+            track.push_back({ x, y, track_width/2.0, track_width/2.0 });
+        }
+    };
     
-    // Top straight (left to right)
-    for (int i = 0; i < straight_len; i += 2) {
-        track.push_back({ (double)(-straight_len/2 + i), -radius, width/2, width/2 });
-    }
+    // section 1
+    add_turn(0, 4.4, 50);
+    add_turn(-75, 75/360.0 * 0.9702 * PI, 30);
+    add_turn(0, 2.01, 50);
     
-    // Right curve
-    for (int i = 0; i <= 180; i += 5) {
-        double angle = i * PI / 180.0;
-        track.push_back({ straight_len/2 + radius * std::sin(angle), -radius * std::cos(angle), width/2, width/2 });
-    }
+    // section 2
+    add_turn(-105, 105/360.0 * 0.5958 * PI, 30);
+    add_turn(0, 0.2943, 50);
+    add_turn(-30, 30/360.0 * 0.5958 * PI, 30);
+    add_turn(0, 0.6381, 50);
+    add_turn(45, 45/360.0 * 1.3228 * PI, 30);
+    add_turn(0, 1.9571, 50);
+    add_turn(45, 45/360.0 * 2.2246 * PI, 30);
+    add_turn(0, 0.5332, 50);
+    add_turn(-30, 30/360.0 * 1.5899 * PI, 30);
+    add_turn(0, 0.2704, 50);
+    add_turn(-105, 105/360.0 * 0.7923 * PI, 30);
+    
+    // section 3
+    add_turn(0, 0.8, 50);
+    add_turn(-90, 90/360.0 * 1.4027 * PI, 30);
+    add_turn(0, 1.7915, 50);
+    add_turn(135, 135/360.0 * 0.6866 * PI, 30);
+    add_turn(0, 0.6, 50);
+    add_turn(75, 75/360.0 * 1.0 * PI, 30);
+    add_turn(0, 0.2146, 50);
+    add_turn(-30, 30/360.0 * 0.8 * PI, 30);
+    add_turn(0, 0.5829, 50);
+    add_turn(-75, 75/360.0 * 0.7 * PI, 30);
+    add_turn(0, 0.5439, 50);
+    add_turn(-120, 105/360.0 * 1.1826 * PI, 30);
+    add_turn(0, 0.5, 50);
     
     return track;
 }
@@ -54,14 +85,14 @@ int main() {
     InitWindow(screenWidth, screenHeight, "Enhanced SCR - C++ Simulation");
     SetTargetFPS(60);
     
-    // Generate track
-    auto track = generateOvalTrack(100.0, 200.0, 10.0, 100);
+    // Generate track (1:1 scale by multiplying 1:43 scale track by 43)
+    auto track = generateHockenheim(43.0);
     
     // Initialize Simulation Model (Ground Truth)
     SingleTrack sim_model;
     Eigen::VectorXd state(6);
     // [x, y, v_long, v_lat, yaw, dyaw]
-    state << 0, 100, 5.0, 0, PI, 0; // Start at bottom straight, moving left (yaw=PI), 5 m/s
+    state << track[0].x, track[0].y, 5.0, 0, 0, 0; // Start at first point
     
     SCRController controller;
     controller.init();
@@ -76,16 +107,16 @@ int main() {
     camera.rotation = 0.0f;
     camera.zoom = 1.0f;
 
+    int prev_closest_idx = 0;
+    double start_time = GetTime();
+    double last_lap_time = 0.0;
+    double best_lap_time = 0.0;
+
     while (!WindowShouldClose()) {
         // --- 1. Control (MPC) ---
         float target_accel = 0.0f;
         float target_steer = 0.0f;
         
-        // Convert Eigen state to SPageFilePhysics mock for the controller interface, 
-        // OR we can just pass the Eigen state directly for now.
-        // For testing the GUI, let's just make it drive straight or use a dummy controller
-        
-        // Dummy simple controller to follow track (Pure Pursuit roughly)
         // Find closest point
         int closest_idx = 0;
         double min_dist = 1e9;
@@ -97,8 +128,22 @@ int main() {
             }
         }
         
-        // Lookahead
-        int target_idx = (closest_idx + 10) % track.size();
+        // Lap timing logic
+        if (closest_idx < track.size() * 0.1 && prev_closest_idx > track.size() * 0.9) {
+            last_lap_time = GetTime() - start_time;
+            if (best_lap_time == 0.0 || last_lap_time < best_lap_time) {
+                best_lap_time = last_lap_time;
+            }
+            start_time = GetTime();
+        }
+        prev_closest_idx = closest_idx;
+        
+        double current_lap_time = GetTime() - start_time;
+        double delta = (best_lap_time > 0.0) ? (current_lap_time - best_lap_time) : 0.0;
+        
+        // Lookahead (scale with speed)
+        int lookahead = 5 + (int)(state(2) * 0.5);
+        int target_idx = (closest_idx + lookahead) % track.size();
         double tx = track[target_idx].x;
         double ty = track[target_idx].y;
         
@@ -111,11 +156,11 @@ int main() {
         while (yaw_error > PI) yaw_error -= 2 * PI;
         while (yaw_error < -PI) yaw_error += 2 * PI;
         
-        target_steer = yaw_error * 0.5; // P controller for steering
+        target_steer = yaw_error * 0.8; // P controller for steering
         
         // Speed control
-        if (state(2) < 15.0) target_accel = 2.0;
-        else target_accel = -1.0;
+        if (state(2) < 20.0) target_accel = 4.0; // target 20 m/s (~72 km/h)
+        else target_accel = -2.0;
         
         // --- 2. Physics Simulation ---
         Eigen::Vector2d u(target_steer, target_accel); // [delta, torque/accel]
@@ -135,9 +180,12 @@ int main() {
             int next_i = (i + 1) % track.size();
             Vector2 p1 = { (float)(track[i].x * SCALE), (float)(track[i].y * SCALE) };
             Vector2 p2 = { (float)(track[next_i].x * SCALE), (float)(track[next_i].y * SCALE) };
-            DrawLineEx(p1, p2, (float)(10.0 * SCALE), LIGHTGRAY);
+            DrawLineEx(p1, p2, (float)(track[i].inner_bound * 2.0 * SCALE), LIGHTGRAY);
             DrawLineEx(p1, p2, 1.0f, DARKGRAY); // Centerline
         }
+        
+        // Draw lookahead target
+        DrawCircle((int)(tx * SCALE), (int)(ty * SCALE), 3.0f, RED);
         
         // Draw Car
         Rectangle carRect = { (float)(state(0) * SCALE), (float)(state(1) * SCALE), (float)(4.0 * SCALE), (float)(2.0 * SCALE) };
@@ -146,8 +194,13 @@ int main() {
         
         EndMode2D();
         
-        DrawText(TextFormat("Speed: %.1f m/s", state(2)), 10, 10, 20, BLACK);
+        // HUD
+        DrawText(TextFormat("Speed: %.1f m/s (%.1f km/h)", state(2), state(2)*3.6), 10, 10, 20, BLACK);
         DrawText(TextFormat("Steer: %.2f rad", target_steer), 10, 30, 20, BLACK);
+        DrawText(TextFormat("Lap Time: %.2f s", current_lap_time), 10, 60, 20, DARKBLUE);
+        DrawText(TextFormat("Last Lap: %.2f s", last_lap_time), 10, 80, 20, GRAY);
+        DrawText(TextFormat("Best Lap: %.2f s", best_lap_time), 10, 100, 20, GOLD);
+        DrawText(TextFormat("Delta: %+.2f s", delta), 10, 120, 20, delta > 0 ? RED : GREEN);
         
         EndDrawing();
     }
