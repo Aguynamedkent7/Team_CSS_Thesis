@@ -127,11 +127,8 @@ void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
         
         const auto& cp = m_track[closest_cp];
         
-        // Maximize progress: -Q * (forward_vector \cdot position)
-        if (k == Hp - 1) { // Only on terminal state or all states? MATLAB does terminal state for SL
-            f(idx_xk + 0) = -m_params.Q_pos * cp.forward(0);
-            f(idx_xk + 1) = -m_params.Q_pos * cp.forward(1);
-        }
+        f(idx_xk + 0) = -m_params.Q_pos * cp.forward(0);
+        f(idx_xk + 1) = -m_params.Q_pos * cp.forward(1);
         
         // 3. Track Bounds
         if (m_params.mode == TrackConstraintMode::SL) {
@@ -195,11 +192,16 @@ void SCRController::formulateQP(const Eigen::VectorXd& current_state) {
             }
         }
         
-        // Input limits via bounding box inequalities (or OSQP bounds)
-        // We can just add them to the constraint matrix
-        // Wait, OSQP supports variable bounds directly! We can just use A_triplets for identity.
-        // Actually, OSQP l <= Ax <= u. We can just add identity rows for inputs.
-        // For simplicity, we add rows to A.
+        // Input limits via bounding box inequalities
+        A_triplets.push_back(Eigen::Triplet<double>(ineq_row, idx_uk + 0, 1.0));
+        l(ineq_row) = m_params.u_min(0);
+        u(ineq_row) = m_params.u_max(0);
+        ineq_row++;
+        
+        A_triplets.push_back(Eigen::Triplet<double>(ineq_row, idx_uk + 1, 1.0));
+        l(ineq_row) = m_params.u_min(1);
+        u(ineq_row) = m_params.u_max(1);
+        ineq_row++;
         
         // Update x_k for next linearization
         x_k = x_next_exact;
