@@ -157,6 +157,8 @@ int main() {
         while (yaw_error < -PI) yaw_error += 2 * PI;
         
         target_steer = yaw_error * 0.8; // P controller for steering
+        if (target_steer > 0.2) target_steer = 0.2;
+        if (target_steer < -0.2) target_steer = -0.2;
         
         // Speed control
         if (state(2) < 20.0) target_accel = 4.0; // target 20 m/s (~72 km/h)
@@ -166,8 +168,8 @@ int main() {
         Eigen::Vector2d u(target_steer, target_accel); // [delta, torque/accel]
         state = sim_model.rk4(state, u, dt);
         
-        // Update camera to follow car
-        camera.target = { (float)(state(0) * SCALE), (float)(state(1) * SCALE) };
+        // Update camera to follow car (Negate Y for Raylib's top-left origin)
+        camera.target = { (float)(state(0) * SCALE), (float)(-state(1) * SCALE) };
 
         // --- 3. Rendering ---
         BeginDrawing();
@@ -178,19 +180,19 @@ int main() {
         // Draw Track
         for (int i = 0; i < track.size(); i++) {
             int next_i = (i + 1) % track.size();
-            Vector2 p1 = { (float)(track[i].x * SCALE), (float)(track[i].y * SCALE) };
-            Vector2 p2 = { (float)(track[next_i].x * SCALE), (float)(track[next_i].y * SCALE) };
+            Vector2 p1 = { (float)(track[i].x * SCALE), (float)(-track[i].y * SCALE) };
+            Vector2 p2 = { (float)(track[next_i].x * SCALE), (float)(-track[next_i].y * SCALE) };
             DrawLineEx(p1, p2, (float)(track[i].inner_bound * 2.0 * SCALE), LIGHTGRAY);
             DrawLineEx(p1, p2, 1.0f, DARKGRAY); // Centerline
         }
         
         // Draw lookahead target
-        DrawCircle((int)(tx * SCALE), (int)(ty * SCALE), 3.0f, RED);
+        DrawCircle((int)(tx * SCALE), (int)(-ty * SCALE), 3.0f, RED);
         
         // Draw Car
-        Rectangle carRect = { (float)(state(0) * SCALE), (float)(state(1) * SCALE), (float)(4.0 * SCALE), (float)(2.0 * SCALE) };
+        Rectangle carRect = { (float)(state(0) * SCALE), (float)(-state(1) * SCALE), (float)(4.0 * SCALE), (float)(2.0 * SCALE) };
         Vector2 carOrigin = { carRect.width / 2, carRect.height / 2 };
-        DrawRectanglePro(carRect, carOrigin, (float)(state(4) * 180.0 / PI), BLUE);
+        DrawRectanglePro(carRect, carOrigin, (float)(-state(4) * 180.0 / PI), BLUE);
         
         EndMode2D();
         
