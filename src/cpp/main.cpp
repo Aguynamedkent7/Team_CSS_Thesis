@@ -94,11 +94,35 @@ int main() {
     // [x, y, v_long, v_lat, yaw, dyaw]
     state << track[0].x, track[0].y, 5.0, 0, 0, 0; // Start at first point
     
-    SCRController controller;
-    controller.init();
+    // Build TrackPoints for Controller
+    std::vector<TrackPoint> mpc_track;
+    for (size_t i = 0; i < track.size(); ++i) {
+        size_t next_i = (i + 1) % track.size();
+        Eigen::Vector2d current(track[i].x, track[i].y);
+        Eigen::Vector2d next(track[next_i].x, track[next_i].y);
+        
+        Eigen::Vector2d forward = (next - current).normalized();
+        Eigen::Vector2d normal(-forward(1), forward(0)); // Points left
+        
+        TrackPoint tp;
+        tp.center = current;
+        tp.forward = forward;
+        tp.normal = normal;
+        tp.left_dist = track[i].inner_bound;
+        tp.right_dist = track[i].outer_bound;
+        mpc_track.push_back(tp);
+    }
     
     const double dt = 1.0 / 60.0; // 60Hz physics step
     const double SCALE = 3.0; // pixels per meter
+    
+    ControllerParams mpc_params;
+    mpc_params.Hp = 20;
+    mpc_params.dt = dt;
+    mpc_params.mode = TrackConstraintMode::SL;
+    
+    SCRController controller;
+    controller.init(mpc_params, mpc_track);
     
     // Camera setup for rendering
     Camera2D camera = { 0 };
@@ -117,7 +141,7 @@ int main() {
         float target_accel = 0.0f;
         float target_steer = 0.0f;
         
-        // Find closest point
+        // Find closest point for Lap Timing
         int closest_idx = 0;
         double min_dist = 1e9;
         for (int i = 0; i < track.size(); i++) {
@@ -141,35 +165,10 @@ int main() {
         double current_lap_time = GetTime() - start_time;
         double delta = (best_lap_time > 0.0) ? (current_lap_time - best_lap_time) : 0.0;
         
-        // Lookahead (scale with speed)
-        int lookahead = 5 + (int)(state(2) * 0.5);
-        int target_idx = (closest_idx + lookahead) % track.size();
-        double tx = track[target_idx].x;
-        double ty = track[target_idx].y;
+        // RUN LTV-MPC
+        controller.computeOptimalControl(state, target_accel, target_steer);
         
-        double dx = tx - state(0);
-        double dy = ty - state(1);
-        double target_yaw = std::atan2(dy, dx);
-        
-        double yaw_error = target_yaw - state(4);
-        // Normalize yaw error
-        while (yaw_error > PI) yaw_error -= 2 * PI;
-        while (yaw_error < -PI) yaw_error += 2 * PI;
-        
-        // Target speed based on corner tightness
-        double target_speed = 25.0; // Max speed on straights
-        if (std::abs(yaw_error) > 0.05) target_speed = 15.0;
-        if (std::abs(yaw_error) > 0.15) target_speed = 8.0;
-        if (std::abs(yaw_error) > 0.3) target_speed = 5.0;
-        
-        // Speed control
-        if (state(2) < target_speed) {
-            target_accel = 3.0; // Accelerate
-        } else {
-            target_accel = -5.0; // Brake
-        }
-        
-        target_steer = yaw_error * 0.8; // P controller for steering
+        // Clamp steer (safety override)
         if (target_steer > 0.2) target_steer = 0.2;
         if (target_steer < -0.2) target_steer = -0.2;
         
@@ -195,8 +194,13 @@ int main() {
             DrawLineEx(p1, p2, 1.0f, DARKGRAY); // Centerline
         }
         
-        // Draw lookahead target
-        DrawCircle((int)(tx * SCALE), (int)(-ty * SCALE), 3.0f, RED);
+        // Draw lookahead target (MPC Trajectory)
+        if (controller.getPredictedTrajectory().cols() > 0) {
+            const Eigen::MatrixXd& pred = controller.getPredictedTrajectory();
+            for (int k = 0; k < pred.cols(); ++k) {
+                DrawCircle((int)(pred(0, k) * SCALE), (int)(-pred(1, k) * SCALE), 2.0f, RED);
+            }
+        }
         
         // Draw Car
         Rectangle carRect = { (float)(state(0) * SCALE), (float)(-state(1) * SCALE), (float)(4.0 * SCALE), (float)(2.0 * SCALE) };
